@@ -1,0 +1,1195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FocusForge | Student Productivity App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class', // Enable dark mode based on 'class'
+            theme: {
+                extend: {
+                    colors: {
+                        'primary-dark': '#1E1E2F',
+                        'accent-red': '#FF6B6B',
+                        'interactive-blue': '#4F46E5',
+                        'bg-light': '#F8F8F8',
+                        'text-primary-dark': '#111827',
+                        'text-secondary-gray': '#6B7280',
+                    },
+                    fontFamily: {
+                        'heading': ['Montserrat', 'sans-serif'],
+                        'body': ['Inter', 'sans-serif'],
+                        'mono': ['Fira Code', 'monospace'],
+                    },
+                    borderRadius: {
+                        'xl-custom': '16px',
+                    },
+                    boxShadow: {
+                        'subtle': '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05)',
+                        'hover-glow': '0 10px 15px -3px rgba(79, 70, 229, 0.3), 0 4px 6px -4px rgba(79, 70, 229, 0.1)',
+                    },
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@700&family=Inter:wght@400&family=Fira+Code:wght@400&display=swap');
+        
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #6B7280;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4F46E5;
+        }
+        ::-webkit-scrollbar-track {
+            background: #F8F8F8;
+        }
+        .dark ::-webkit-scrollbar-track {
+            background: #1E1E2F;
+        }
+
+        @keyframes pulse-focus {
+            0%, 100% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.4); }
+            50% { transform: scale(1.02); opacity: 0.95; box-shadow: 0 0 0 10px rgba(79, 70, 229, 0); }
+        }
+        .animate-pulse-focus {
+            animation: pulse-focus 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+    </style>
+</head>
+<body id="app-body" class="font-body transition-colors duration-300 min-h-screen bg-bg-light dark:bg-primary-dark text-text-primary-dark dark:text-bg-light overflow-y-auto">
+
+    <div id="app-root" class="flex min-h-screen">
+        </div>
+
+    <script>
+        // GLOBAL STATE
+        const appState = {
+            currentPage: 'landing', 
+            isLoggedIn: false,
+            isDarkTheme: false, // Initialized based on local storage later
+            timer: {
+                isRunning: false,
+                isWorkSession: true, 
+                workDuration: 25 * 60, 
+                breakDuration: 5 * 60,  
+                remainingTime: 25 * 60, 
+                intervalId: null,
+                focusMinutesLogged: 0,
+            },
+            tasks: [
+                { id: 1, title: 'Read Chapter 3 of Calculus', completed: false, type: 'Study', priority: 'High', dueDate: new Date(Date.now() + 86400000).toISOString().split('T')[0] },
+                { id: 2, title: 'Outline FocusForge Feature List', completed: true, type: 'Project', priority: 'Medium', dueDate: null },
+                { id: 3, title: 'Send email to group partners', completed: false, type: 'Admin', priority: 'Low', dueDate: null },
+            ],
+            notes: 'Quick notes for today: Start with the most difficult task. Remember to drink water!',
+            // *** FIX: API Key is now intentionally blank as requested ***
+            aiApiKey: '', 
+            focusStreak: 3, 
+            dailyGoal: 120, 
+            userId: 'student-user-1234', 
+            dailyLog: [ 
+                { timestamp: Date.now() - 86400000, entry: "Yesterday was productive, completed the calculus reading but struggled with task prioritization." }
+            ],
+        };
+        
+        // Initialize remainingTime based on default work duration
+        appState.timer.remainingTime = appState.timer.workDuration;
+
+        // --- CORE FUNCTIONS ---
+
+        /** Updates the page content based on appState.currentPage. */
+        function renderPage() {
+            const root = document.getElementById('app-root');
+            let content = '';
+            
+            if (!appState.isLoggedIn) {
+                if (appState.currentPage === 'auth') {
+                    content = getAuthPageHTML();
+                } else {
+                    content = getLandingPageHTML();
+                }
+            } else {
+                content = getDashboardLayoutHTML();
+            }
+
+            root.innerHTML = content;
+            
+            setTimeout(() => { 
+                if (appState.isLoggedIn) {
+                    initSidebarListeners();
+                    renderContentArea();
+                    // Ensure the header toggle state is set on render
+                    const headerToggle = document.getElementById('theme-toggle-header');
+                    if (headerToggle) headerToggle.checked = appState.isDarkTheme;
+                }
+                
+                // Set theme class on html/body
+                document.getElementById('app-body').classList.toggle('dark', appState.isDarkTheme);
+                document.documentElement.classList.toggle('dark', appState.isDarkTheme);
+            }, 0);
+        }
+
+        /** Renders the content area within the dashboard layout. */
+        function renderContentArea() {
+            const contentArea = document.getElementById('content-area');
+            if (!contentArea) return;
+
+            let contentHTML = '';
+            switch (appState.currentPage) {
+                case 'dashboard':
+                    contentHTML = getDashboardContentHTML();
+                    break;
+                case 'tasks':
+                    contentHTML = getTasksContentHTML();
+                    break;
+                case 'analytics':
+                    contentHTML = getAnalyticsContentHTML();
+                    break;
+                case 'settings':
+                    contentHTML = getSettingsContentHTML();
+                    break;
+                default:
+                    contentHTML = `<h2 class="text-2xl font-heading">Page Not Found</h2>`;
+            }
+            contentArea.innerHTML = contentHTML;
+
+            // Execute content-specific scripts
+            if (appState.currentPage === 'dashboard') {
+                initDashboardListeners();
+                updateTimerDisplay();
+            } else if (appState.currentPage === 'tasks') {
+                initTaskListeners();
+            } else if (appState.currentPage === 'analytics') {
+                initAnalyticsCharts();
+            } else if (appState.currentPage === 'settings') {
+                initSettingsListeners();
+            }
+        }
+
+        // --- NAVIGATION & AUTH ---
+
+        function navigate(page) {
+            appState.currentPage = page;
+            if (!appState.isLoggedIn && page !== 'landing' && page !== 'auth') {
+                appState.currentPage = 'auth';
+            }
+            if (page !== 'dashboard' && appState.timer.isRunning) {
+                toggleTimer();
+            }
+            renderPage();
+        }
+
+        function login() {
+            appState.isLoggedIn = true;
+            appState.currentPage = 'dashboard';
+            renderPage();
+        }
+
+        function logout() {
+            if (appState.timer.intervalId) {
+                clearInterval(appState.timer.intervalId);
+                appState.timer.intervalId = null;
+            }
+            appState.isLoggedIn = false;
+            appState.currentPage = 'landing';
+            renderPage();
+        }
+
+        function initSidebarListeners() {
+            const links = document.querySelectorAll('.sidebar-link');
+            links.forEach(link => {
+                link.addEventListener('click', (e) => {
+                    const page = e.currentTarget.getAttribute('data-page');
+                    if (page) {
+                        navigate(page);
+                    } else if (e.currentTarget.id === 'logout-btn') {
+                        logout();
+                    }
+                });
+            });
+        }
+        
+        // --- TIMER LOGIC (Retained from previous version) ---
+
+        function formatTime(totalSeconds) {
+            const minutes = Math.floor(totalSeconds / 60);
+            const seconds = totalSeconds % 60;
+            return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+        }
+
+        function updateTimerDisplay() {
+            const display = document.getElementById('timer-display');
+            const statusText = document.getElementById('timer-status');
+            const timerCard = document.getElementById('timer-card');
+            
+            if (display) display.textContent = formatTime(appState.timer.remainingTime);
+
+            if (statusText) {
+                statusText.textContent = appState.timer.isWorkSession ? 'Focus Session' : 'Short Break';
+            }
+
+            if (timerCard) {
+                const isPulsing = appState.timer.isRunning && appState.timer.isWorkSession;
+                timerCard.classList.toggle('animate-pulse-focus', isPulsing);
+                timerCard.classList.toggle('shadow-lg', !isPulsing);
+            }
+        }
+
+        function toggleTimer() {
+            if (appState.timer.isRunning) {
+                clearInterval(appState.timer.intervalId);
+                appState.timer.isRunning = false;
+            } else {
+                appState.timer.isRunning = true;
+                appState.timer.intervalId = setInterval(tick, 1000);
+            }
+            const btn = document.getElementById('timer-toggle-btn');
+            if (btn) {
+                btn.innerHTML = appState.timer.isRunning 
+                    ? `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> Pause`
+                    : `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> Start`;
+            }
+            updateTimerDisplay();
+        }
+
+        function resetTimer() {
+            clearInterval(appState.timer.intervalId);
+            appState.timer.isRunning = false;
+            appState.timer.isWorkSession = true;
+            appState.timer.remainingTime = appState.timer.workDuration;
+            
+            if (appState.currentPage === 'dashboard') {
+                renderContentArea();
+            }
+        }
+
+        function tick() {
+            if (appState.timer.remainingTime > 0) {
+                appState.timer.remainingTime--;
+                if (appState.timer.isWorkSession) {
+                    appState.timer.focusMinutesLogged += (1/60);
+                }
+                updateTimerDisplay();
+            } else {
+                clearInterval(appState.timer.intervalId);
+                const message = `${appState.timer.isWorkSession ? 'Focus Session' : 'Break'} finished! Time for a ${appState.timer.isWorkSession ? 'break' : 'focus session'}.`;
+                showCustomMessage(message);
+                
+                appState.timer.isWorkSession = !appState.timer.isWorkSession;
+                
+                appState.timer.remainingTime = appState.timer.isWorkSession 
+                    ? appState.timer.workDuration 
+                    : appState.timer.breakDuration;
+                
+                appState.timer.isRunning = false;
+                
+                if (appState.currentPage === 'dashboard') {
+                    renderContentArea();
+                }
+            }
+        }
+        
+        function showCustomMessage(message) {
+             const existing = document.getElementById('floating-notification');
+             if (existing) existing.remove();
+
+             const notification = document.createElement('div');
+             notification.id = 'floating-notification';
+             notification.className = 'fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 p-6 bg-accent-red text-white rounded-xl-custom shadow-2xl transition-opacity duration-500 font-heading text-lg opacity-0';
+             notification.innerHTML = message;
+             
+             document.body.appendChild(notification);
+             
+             setTimeout(() => { notification.style.opacity = '1'; }, 10);
+             
+             setTimeout(() => {
+                 notification.style.opacity = '0';
+                 setTimeout(() => notification.remove(), 500);
+             }, 3000);
+        }
+
+        function initDashboardListeners() {
+            // *** FIX: Attach toggleTheme to the header button ***
+            document.getElementById('theme-toggle-header').addEventListener('change', toggleTheme);
+
+            document.getElementById('timer-toggle-btn').addEventListener('click', toggleTimer);
+            document.getElementById('timer-reset-btn').addEventListener('click', resetTimer);
+            
+            // Quick Edit Timer Inputs
+            const quickWorkInput = document.getElementById('quick-work-input');
+            const quickBreakInput = document.getElementById('quick-break-input');
+
+            function handleQuickTimerChange() {
+                const newWorkMin = parseInt(quickWorkInput.value);
+                const newBreakMin = parseInt(quickBreakInput.value);
+                
+                if (newWorkMin > 0 && newBreakMin > 0) {
+                    appState.timer.workDuration = newWorkMin * 60;
+                    appState.timer.breakDuration = newBreakMin * 60;
+                    
+                    if (!appState.timer.isRunning) {
+                        if (appState.timer.isWorkSession) {
+                            appState.timer.remainingTime = appState.timer.workDuration;
+                        } else {
+                            appState.timer.remainingTime = appState.timer.breakDuration;
+                        }
+                    }
+                    updateTimerDisplay();
+                    showCustomMessage(`Pomodoro durations updated: ${newWorkMin} min work / ${newBreakMin} min break.`);
+                } else {
+                    showCustomMessage('Durations must be positive numbers!');
+                }
+            }
+            
+            quickWorkInput.addEventListener('change', handleQuickTimerChange);
+            quickBreakInput.addEventListener('change', handleQuickTimerChange);
+            
+            // Notes Listeners
+            const notesInput = document.getElementById('quick-notes-input');
+            const notesSaveBtn = document.getElementById('save-notes-btn');
+            const notesAISummaryBtn = document.getElementById('ai-summary-notes-btn');
+
+            notesInput.value = appState.notes;
+            notesInput.addEventListener('input', (e) => {
+                appState.notes = e.target.value;
+            });
+            notesSaveBtn.addEventListener('click', () => {
+                showCustomMessage('Notes saved successfully!');
+            });
+            notesAISummaryBtn.addEventListener('click', aiSummarizeNotes);
+
+            // Daily Log Listeners
+            const dailyLogInput = document.getElementById('daily-log-input');
+            const todayLogEntry = appState.dailyLog.find(log => new Date(log.timestamp).toDateString() === new Date().toDateString());
+            dailyLogInput.value = todayLogEntry ? todayLogEntry.entry : '';
+            
+            document.getElementById('save-daily-log-btn').addEventListener('click', () => {
+                const entry = dailyLogInput.value.trim();
+                if (entry) {
+                    const todayIndex = appState.dailyLog.findIndex(log => new Date(log.timestamp).toDateString() === new Date().toDateString());
+                    if (todayIndex !== -1) {
+                        appState.dailyLog[todayIndex].entry = entry;
+                        appState.dailyLog[todayIndex].timestamp = Date.now();
+                    } else {
+                        appState.dailyLog.push({ timestamp: Date.now(), entry: entry });
+                    }
+                    showCustomMessage('Daily log entry saved!');
+                } else {
+                    showCustomMessage('Daily log cannot be empty.');
+                }
+            });
+            
+            // Tasks Listeners
+            const addTaskInput = document.getElementById('quick-add-task-input');
+            document.getElementById('add-task-btn').addEventListener('click', () => {
+                const title = addTaskInput.value.trim();
+                if (title) {
+                    addTask(title);
+                    addTaskInput.value = '';
+                    renderContentArea();
+                }
+            });
+
+            document.getElementById('active-tasks-list').addEventListener('click', (e) => {
+                if (e.target.closest('.task-checkbox')) {
+                    const id = parseInt(e.target.closest('.task-checkbox').dataset.taskId);
+                    toggleTaskCompletion(id);
+                    renderContentArea(); 
+                }
+            });
+        }
+        
+        // --- TASK MANAGER LOGIC (Retained from previous version) ---
+
+        function addTask(title, priority = 'Medium', type = 'General', dueDate = null) {
+            const newTask = {
+                id: Date.now(),
+                title: title,
+                completed: false,
+                type: type,
+                priority: priority,
+                dueDate: dueDate,
+            };
+            appState.tasks.push(newTask);
+        }
+
+        function deleteTask(id) {
+            appState.tasks = appState.tasks.filter(task => task.id !== id);
+        }
+
+        function toggleTaskCompletion(id) {
+            const task = appState.tasks.find(t => t.id === id);
+            if (task) {
+                task.completed = !task.completed;
+            }
+        }
+        
+        function initTaskListeners() {
+            document.getElementById('new-task-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const title = document.getElementById('new-task-title').value.trim();
+                const priority = document.getElementById('new-task-priority').value;
+                const type = document.getElementById('new-task-type').value;
+                const dueDate = document.getElementById('new-task-due-date').value || null;
+                
+                if (title) {
+                    addTask(title, priority, type, dueDate);
+                    // Clear inputs
+                    document.getElementById('new-task-title').value = '';
+                    document.getElementById('new-task-priority').value = 'Medium';
+                    document.getElementById('new-task-type').value = 'General';
+                    document.getElementById('new-task-due-date').value = '';
+
+                    renderContentArea();
+                }
+            });
+
+            document.getElementById('tasks-full-list').addEventListener('click', (e) => {
+                const target = e.target;
+                const taskId = target.closest('[data-task-id]') ? parseInt(target.closest('[data-task-id]').dataset.taskId) : null;
+                
+                if (!taskId) return;
+                
+                if (target.closest('.delete-task-btn')) {
+                    deleteTask(taskId);
+                    renderContentArea();
+                } else if (target.closest('.toggle-completion-btn')) {
+                    toggleTaskCompletion(taskId);
+                    renderContentArea();
+                } else if (target.closest('.ai-priority-btn')) {
+                    aiSuggestPriority(taskId);
+                }
+            });
+            
+            document.getElementById('ai-summarize-tasks-btn').addEventListener('click', aiSummarizeTasks);
+        }
+        
+        // --- ANALYTICS & CHART LOGIC (Retained from previous version) ---
+        
+        let focusChart = null;
+        let taskChart = null;
+        
+        function initAnalyticsCharts() {
+            const weeklyFocusData = [
+                Math.round(appState.timer.focusMinutesLogged) || 45,
+                80, 120, 60, 150, 90, 180
+            ];
+            
+            const taskTypes = appState.tasks.reduce((acc, task) => {
+                acc[task.type] = (acc[task.type] || 0) + 1;
+                return acc;
+            }, {});
+            
+            const taskChartLabels = Object.keys(taskTypes);
+            const taskChartData = Object.values(taskTypes);
+            
+            if (focusChart) focusChart.destroy();
+            if (taskChart) taskChart.destroy();
+            
+            const isDark = appState.isDarkTheme;
+            const primaryColor = isDark ? '#FF6B6B' : '#4F46E5';
+            const secondaryColor = isDark ? '#4F46E5' : '#FF6B6B';
+            const textColor = isDark ? '#F8F8F8' : '#111827';
+            const gridColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
+            
+            const focusCtx = document.getElementById('weeklyFocusChart');
+            if (focusCtx) {
+                focusChart = new Chart(focusCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+                        datasets: [{
+                            label: 'Focus Minutes',
+                            data: weeklyFocusData,
+                            backgroundColor: primaryColor,
+                            borderColor: primaryColor,
+                            borderWidth: 1,
+                            borderRadius: 6,
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: { duration: 1000, easing: 'easeOutQuart' },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                grid: { color: gridColor },
+                                ticks: { color: textColor, font: { family: 'Inter' } }
+                            },
+                            x: {
+                                grid: { display: false },
+                                ticks: { color: textColor, font: { family: 'Inter' } }
+                            }
+                        },
+                        plugins: {
+                            legend: { display: false },
+                            title: {
+                                display: true,
+                                text: 'Weekly Focus Time (Minutes)',
+                                color: textColor,
+                                font: { family: 'Montserrat', size: 16 }
+                            }
+                        }
+                    }
+                });
+            }
+
+            const taskCtx = document.getElementById('taskTypeChart');
+            if (taskCtx) {
+                taskChart = new Chart(taskCtx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: taskChartLabels.length ? taskChartLabels : ['General'],
+                        datasets: [{
+                            label: 'Task Count',
+                            data: taskChartData.length ? taskChartData : [1],
+                            backgroundColor: [
+                                primaryColor,
+                                secondaryColor,
+                                '#4F46E5',
+                                '#1E1E2F',
+                                '#FFBBBB'
+                            ],
+                            hoverOffset: 4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: { duration: 1000, easing: 'easeOutQuart' },
+                        plugins: {
+                            legend: {
+                                position: 'right',
+                                labels: { color: textColor, font: { family: 'Inter' } }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Task Type Distribution',
+                                color: textColor,
+                                font: { family: 'Montserrat', size: 16 }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+        
+        // --- SETTINGS / THEME LOGIC ---
+        
+        // *** FIX: Corrected Dark Mode Logic ***
+        function toggleTheme() {
+            appState.isDarkTheme = !appState.isDarkTheme;
+            const isDark = appState.isDarkTheme;
+            
+            // Set classes on relevant elements
+            document.getElementById('app-body').classList.toggle('dark', isDark);
+            document.documentElement.classList.toggle('dark', isDark);
+            
+            // Persist theme to local storage
+            localStorage.setItem('focusforge-theme', isDark ? 'dark' : 'light');
+            
+            // Synchronize all checkboxes
+            const settingsToggle = document.getElementById('theme-toggle');
+            const headerToggle = document.getElementById('theme-toggle-header');
+            
+            if (settingsToggle) settingsToggle.checked = isDark;
+            if (headerToggle) headerToggle.checked = isDark;
+
+            // Re-initialize charts if necessary
+            if (appState.currentPage === 'analytics') {
+                renderContentArea();
+            }
+        }
+
+        function initSettingsListeners() {
+            // Theme Toggle
+            document.getElementById('theme-toggle').addEventListener('change', toggleTheme);
+            document.getElementById('theme-toggle').checked = appState.isDarkTheme;
+            
+            // Pomodoro Profile Inputs
+            const workInput = document.getElementById('work-duration-input');
+            const breakInput = document.getElementById('break-duration-input');
+            workInput.value = appState.timer.workDuration / 60;
+            breakInput.value = appState.timer.breakDuration / 60;
+            
+            // AI API Key Input (Initialize value)
+            const aiApiKeyInput = document.getElementById('ai-api-key-input');
+            aiApiKeyInput.value = appState.aiApiKey;
+            
+            document.getElementById('save-settings-btn').addEventListener('click', () => {
+                const newWorkMin = parseInt(workInput.value);
+                const newBreakMin = parseInt(breakInput.value);
+                
+                if (newWorkMin > 0 && newBreakMin > 0) {
+                    appState.timer.workDuration = newWorkMin * 60;
+                    appState.timer.breakDuration = newBreakMin * 60;
+                    
+                    if (!appState.timer.isRunning && appState.timer.isWorkSession) {
+                        appState.timer.remainingTime = appState.timer.workDuration;
+                    }
+
+                    showCustomMessage('Pomodoro profile and settings saved!');
+                    if (appState.currentPage === 'dashboard') {
+                        renderContentArea();
+                    }
+                } else {
+                    showCustomMessage('Work and Break durations must be positive numbers!');
+                }
+                
+                // Save AI Key from the input
+                appState.aiApiKey = aiApiKeyInput.value.trim();
+            });
+        }
+
+        // --- AI INTEGRATION HOOKS (PLACEHOLDERS) ---
+
+        function aiSummarizeNotes() {
+            if (!appState.aiApiKey) {
+                showCustomMessage('⚠️ AI Summarization failed: Please enter a valid API Key in Settings.');
+                return;
+            }
+            console.log(`AI Call: Summarize notes: "${appState.notes}"`);
+            showCustomMessage('🧠 AI is summarizing your notes... (Placeholder: Summary will appear here soon!)');
+        }
+
+        function aiSummarizeTasks() {
+            if (!appState.aiApiKey) {
+                showCustomMessage('⚠️ AI Summarization failed: Please enter a valid API Key in Settings.');
+                return;
+            }
+            const taskTitles = appState.tasks.map(t => t.title).join(', ');
+            console.log(`AI Call: Summarize tasks: "${taskTitles}"`);
+            showCustomMessage('🧠 AI is generating a task summary... (Placeholder: Focus on the top 3 items.)');
+        }
+        
+        function aiSuggestPriority(taskId) {
+            if (!appState.aiApiKey) {
+                showCustomMessage('⚠️ AI Suggestion failed: Please enter a valid API Key in Settings.');
+                return;
+            }
+            const task = appState.tasks.find(t => t.id === taskId);
+            console.log(`AI Call: Suggest priority for task: "${task.title}"`);
+            showCustomMessage(`🧠 AI suggests **High** priority for "${task.title}" based on current load. (Placeholder)`);
+        }
+
+        // --- HTML TEMPLATES (Unchanged) ---
+        
+        function getDashboardLayoutHTML() {
+            const getNavItem = (page, iconSVG, label) => `
+                <a href="#" data-page="${page}" class="sidebar-link flex items-center p-4 rounded-xl-custom transition-all duration-200 
+                    ${appState.currentPage === page 
+                        ? 'bg-interactive-blue text-white shadow-lg shadow-interactive-blue/50' 
+                        : 'text-text-secondary-gray dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-primary-dark/50 hover:text-interactive-blue'}">
+                    ${iconSVG}
+                    <span class="ml-4 font-heading text-sm hidden md:block">${label}</span>
+                </a>
+            `;
+
+            return `
+                <aside class="w-20 md:w-64 flex-shrink-0 p-4 transition-all duration-300 border-r border-gray-200 dark:border-primary-dark/50 shadow-md dark:shadow-none bg-white dark:bg-primary-dark/80 backdrop-blur-sm fixed md:relative h-full z-10">
+                    <div class="flex items-center justify-center md:justify-start mb-10 h-16">
+                        <span class="text-2xl font-heading text-interactive-blue hidden md:block">Focus<span class="text-accent-red">Forge</span></span>
+                        <span class="text-3xl font-heading text-interactive-blue block md:hidden">F<span class="text-accent-red">F</span></span>
+                    </div>
+
+                    <nav class="flex flex-col h-[calc(100%-8rem)] justify-between">
+                        <div class="space-y-3">
+                            ${getNavItem('dashboard', `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3"></path></svg>`, 'Dashboard')}
+                            ${getNavItem('tasks', `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M10 16h.01"></path></svg>`, 'Task Manager')}
+                            ${getNavItem('analytics', `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.944 9.944 0 0115 13m-4-10v8m0-8a9.944 9.944 0 00-4 9m0 0h8m-8 0a9.944 9.944 0 0010 0m-10 0a9.944 9.944 0 01-4 9m14-9v8m-4-8a9.944 9.944 0 014 9"></path></svg>`, 'Analytics')}
+                        </div>
+
+                        <div class="space-y-3">
+                            ${getNavItem('settings', `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.82 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.82 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.82-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.82-3.31 2.37-2.37a1.724 1.724 0 002.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>`, 'Settings')}
+                            <button id="logout-btn" class="sidebar-link w-full flex items-center p-4 rounded-xl-custom text-text-secondary-gray dark:text-gray-300 hover:bg-accent-red hover:text-white transition-all duration-200">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3v-1a3 3 0 013-3h7"></path></svg>
+                                <span class="ml-4 font-heading text-sm hidden md:block">Logout</span>
+                            </button>
+                        </div>
+                    </nav>
+                </aside>
+
+                <main id="content-area" class="flex-1 p-6 md:p-10 transition-all duration-300 overflow-y-auto">
+                    </main>
+            `;
+        }
+        
+        function getDashboardHeaderHTML() {
+            const userId = appState.userId;
+            
+            return `
+                <header class="flex justify-between items-center py-4 mb-8 border-b border-gray-200 dark:border-primary-dark/50">
+                    <h1 class="text-3xl md:text-4xl font-heading">Welcome Back, Student!</h1>
+                    <div class="flex items-center space-x-4">
+                        <span class="text-sm font-body text-text-secondary-gray dark:text-gray-400 hidden sm:block">ID: ${userId}</span>
+                        
+                        <div class="flex items-center space-x-2 p-2 bg-gray-100 dark:bg-primary-dark/50 rounded-xl-custom shadow-subtle border border-gray-200 dark:border-primary-dark/50 transition duration-200">
+                            <svg class="w-5 h-5 text-text-secondary-gray dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707M16.95 7.05a1 1 0 00-1.414-1.414M7.05 16.95a1 1 0 001.414 1.414M12 10a2 2 0 100 4 2 2 0 000-4z"></path></svg>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" value="" id="theme-toggle-header" onclick="toggleTheme()" class="sr-only peer" ${appState.isDarkTheme ? 'checked' : ''}>
+                                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-interactive-blue/50 dark:peer-focus:ring-interactive-blue rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-interactive-blue"></div>
+                            </label>
+                            <svg class="w-5 h-5 text-interactive-blue dark:text-yellow-400" fill="currentColor" viewBox="0 0 20 20"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path></svg>
+                        </div>
+                    </div>
+                </header>
+            `;
+        }
+
+        function getLandingPageHTML() {
+            return `
+                <div class="flex flex-col min-h-screen items-center justify-center w-full p-4 bg-bg-light dark:bg-primary-dark transition-colors duration-300">
+                    <header class="w-full max-w-7xl flex justify-between items-center py-6 absolute top-0 px-4 md:px-8">
+                        <span class="text-3xl font-heading text-interactive-blue">Focus<span class="text-accent-red">Forge</span></span>
+                        <div class="space-x-4">
+                            <button onclick="navigate('auth')" class="text-text-primary-dark dark:text-bg-light hover:text-interactive-blue dark:hover:text-interactive-blue transition duration-200 font-body">Login</button>
+                            <button onclick="navigate('auth')" class="px-6 py-2 bg-interactive-blue text-white font-heading rounded-xl-custom shadow-md shadow-interactive-blue/30 hover:shadow-lg hover:scale-[1.02] transition duration-200">Sign Up</button>
+                        </div>
+                    </header>
+
+                    <div class="w-full max-w-7xl flex flex-col items-center justify-center pt-24 pb-16">
+                        <section class="flex flex-col md:flex-row items-center justify-between w-full">
+                            <div class="md:w-1/2 mb-10 md:mb-0 text-center md:text-left">
+                                <h1 class="text-5xl md:text-7xl font-heading mb-6 leading-tight">
+                                    Forge Your <span class="text-interactive-blue">Focus</span>. Master Your <span class="text-accent-red">Time</span>.
+                                </h1>
+                                <p class="text-xl text-text-secondary-gray dark:text-gray-400 mb-8 max-w-lg mx-auto md:mx-0">
+                                    The AI-powered productivity app built for students. Pomodoro, Task Management, and Analytics in one clean interface.
+                                </p>
+                                <button onclick="navigate('auth')" class="px-8 py-4 bg-accent-red text-white text-lg font-heading rounded-xl-custom shadow-xl shadow-accent-red/40 hover:shadow-hover-glow hover:scale-[1.05] transition duration-300">
+                                    Start Focusing Now &rarr;
+                                </button>
+                            </div>
+                            <div class="md:w-1/2 flex justify-center">
+                                <div class="w-64 h-64 md:w-96 md:h-96 bg-gray-200 dark:bg-primary-dark/50 rounded-full flex items-center justify-center shadow-2xl">
+                                    <span class="text-6xl text-interactive-blue font-mono">{'AI'}</span>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="w-full py-12">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                                <div class="p-8 bg-white dark:bg-primary-dark/90 rounded-xl-custom shadow-subtle hover:shadow-lg transition duration-300 hover:scale-[1.02] border border-gray-100 dark:border-primary-dark/50">
+                                    <div class="text-4xl mb-4">🧠</div>
+                                    <h3 class="text-xl font-heading mb-2">AI Coach Hook</h3>
+                                    <p class="text-text-secondary-gray dark:text-gray-400">Intelligent suggestions for priority and note summarization.</p>
+                                </div>
+                                <div class="p-8 bg-white dark:bg-primary-dark/90 rounded-xl-custom shadow-subtle hover:shadow-lg transition duration-300 hover:scale-[1.02] border border-gray-100 dark:border-primary-dark/50">
+                                    <div class="text-4xl mb-4">⏱️</div>
+                                    <h3 class="text-xl font-heading mb-2">Precision Pomodoro</h3>
+                                    <p class="text-text-secondary-gray dark:text-gray-400">A distraction-free timer to maximize deep work sessions.</p>
+                                </div>
+                                <div class="p-8 bg-white dark:bg-primary-dark/90 rounded-xl-custom shadow-subtle hover:shadow-lg transition duration-300 hover:scale-[1.02] border border-gray-100 dark:border-primary-dark/50">
+                                    <div class="text-4xl mb-4">📊</div>
+                                    <h3 class="text-xl font-heading mb-2">Actionable Analytics</h3>
+                                    <p class="text-text-secondary-gray dark:text-gray-400">Visualize your focus time and task completion trends.</p>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+
+                    <footer class="w-full max-w-7xl py-6 border-t border-gray-200 dark:border-primary-dark/50 text-center text-text-secondary-gray dark:text-gray-400">
+                        © 2025 FocusForge. All rights reserved. | Gamification Badges: 🏅 Level 1
+                    </footer>
+                </div>
+            `;
+        }
+
+        function getAuthPageHTML() {
+            return `
+                <div class="flex flex-col min-h-screen items-center justify-center p-4 bg-bg-light dark:bg-primary-dark transition-colors duration-300 w-full">
+                    <div class="w-full max-w-md p-8 bg-white dark:bg-primary-dark/90 rounded-xl-custom shadow-2xl border border-gray-100 dark:border-primary-dark/50">
+                        <h2 class="text-3xl font-heading text-center mb-6 text-interactive-blue">Focus<span class="text-accent-red">Forge</span></h2>
+                        
+                        <form id="auth-form" onsubmit="event.preventDefault(); login();">
+                            <div class="mb-4">
+                                <label for="email" class="block text-sm font-medium text-text-primary-dark dark:text-bg-light mb-1">Email Address</label>
+                                <input type="email" id="email" required class="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-primary-dark rounded-xl-custom focus:ring-interactive-blue focus:border-interactive-blue transition duration-200 text-text-primary-dark dark:text-bg-light" placeholder="student@university.edu">
+                            </div>
+                            <div class="mb-6">
+                                <label for="password" class="block text-sm font-medium text-text-primary-dark dark:text-bg-light mb-1">Password</label>
+                                <input type="password" id="password" required class="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-primary-dark rounded-xl-custom focus:ring-interactive-blue focus:border-interactive-blue transition duration-200 text-text-primary-dark dark:text-bg-light" placeholder="••••••••">
+                            </div>
+                            
+                            <button type="submit" class="w-full py-3 mb-4 bg-interactive-blue text-white font-heading rounded-xl-custom shadow-md shadow-interactive-blue/30 hover:shadow-lg hover:scale-[1.01] transition duration-200">
+                                Log In / Sign Up
+                            </button>
+                        </form>
+                        
+                        <p class="text-center text-text-secondary-gray dark:text-gray-400 mb-4">or continue with</p>
+                        
+                        <div class="space-y-3">
+                            <button onclick="login()" class="w-full flex items-center justify-center py-3 border border-gray-300 dark:border-gray-700 text-text-primary-dark dark:text-bg-light font-medium rounded-xl-custom hover:bg-gray-50 dark:hover:bg-primary-dark/50 transition duration-200">
+                                <img src="
+                            <button onclick="login()" class="w-full flex items-center justify-center py-3 border border-gray-300 dark:border-gray-700 text-text-primary-dark dark:text-bg-light font-medium rounded-xl-custom hover:bg-gray-50 dark:hover:bg-primary-dark/50 transition duration-200">
+                                <svg class="w-5 h-5 mr-3" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c6.627 0 12 5.373 12 12s-5.373 12-12 12-12-5.373-12-12 5.373-12 12-12zm-3.153 18.25c.196.196.452.294.708.294.256 0 .512-.098.708-.294l3.882-3.882c.196-.196.294-.452.294-.708 0-.256-.098-.512-.294-.708-.196-.196-.452-.294-.708-.294-.256 0-.512.098-.708.294l-3.882 3.882c-.196.196-.294.452-.294.708 0 .256.098.512.294.708zM12 2.5c5.247 0 9.5 4.253 9.5 9.5s-4.253 9.5-9.5 9.5-9.5-4.253-9.5-9.5 4.253-9.5 9.5-9.5zm-3.153 15.75c.392.392 1.028.392 1.42 0l3.882-3.882c.392-.392.392-1.028 0-1.42-.392-.392-1.028-.392-1.42 0l-3.882 3.882c-.392.392-.392 1.028 0 1.42z"/></svg>
+                                Apple
+                            </button>
+                        </div>
+                        
+                        <div class="mt-6 text-center">
+                            <button onclick="navigate('landing')" class="text-sm text-interactive-blue hover:underline transition duration-200">
+                                &larr; Back to FocusForge Home
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function getDashboardContentHTML() {
+            const timeClass = appState.timer.isWorkSession ? 'text-interactive-blue' : 'text-accent-red';
+            const badgeClass = (priority) => {
+                switch (priority) {
+                    case 'High': return 'bg-accent-red/20 text-accent-red';
+                    case 'Medium': return 'bg-interactive-blue/20 text-interactive-blue';
+                    case 'Low': return 'bg-gray-400/20 text-gray-500 dark:text-gray-400';
+                    default: return 'bg-gray-400/20 text-gray-500 dark:text-gray-400';
+                }
+            };
+
+            const activeTasks = appState.tasks.filter(t => !t.completed).slice(0, 5); 
+            const focusProgress = Math.min(100, (Math.round(appState.timer.focusMinutesLogged) / appState.dailyGoal) * 100);
+            
+            const lastLogEntry = appState.dailyLog[appState.dailyLog.length - 1];
+
+            return `
+                ${getDashboardHeaderHTML()}
+                
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div id="timer-card" class="lg:col-span-2 p-8 bg-white dark:bg-primary-dark/90 rounded-xl-custom shadow-lg transition-all duration-500 border border-gray-100 dark:border-primary-dark/50">
+                        <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
+                            <h2 id="timer-status" class="text-xl font-heading ${timeClass} transition-colors duration-500 mb-4 md:mb-0">${appState.timer.isWorkSession ? 'Focus Session' : 'Short Break'}</h2>
+                            <div class="flex items-center space-x-3 text-sm">
+                                <label class="flex items-center space-x-1 font-body text-text-secondary-gray dark:text-gray-400">
+                                    <span class="text-interactive-blue">Work (min):</span>
+                                    <input type="number" id="quick-work-input" value="${appState.timer.workDuration / 60}" min="1" class="w-16 px-2 py-1 border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-primary-dark rounded-lg text-center text-sm font-mono focus:border-interactive-blue focus:ring-interactive-blue">
+                                </label>
+                                <label class="flex items-center space-x-1 font-body text-text-secondary-gray dark:text-gray-400">
+                                    <span class="text-accent-red">Break (min):</span>
+                                    <input type="number" id="quick-break-input" value="${appState.timer.breakDuration / 60}" min="1" class="w-16 px-2 py-1 border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-primary-dark rounded-lg text-center text-sm font-mono focus:border-accent-red focus:ring-accent-red">
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="flex items-center justify-between">
+                            <p id="timer-display" class="text-8xl md:text-9xl font-mono ${timeClass} transition-colors duration-500">
+                                ${formatTime(appState.timer.remainingTime)}
+                            </p>
+                            <div class="flex flex-col space-y-3 ml-6">
+                                <button id="timer-toggle-btn" class="flex items-center justify-center px-6 py-3 bg-interactive-blue text-white font-heading rounded-xl-custom shadow-md shadow-interactive-blue/30 hover:scale-[1.05] hover:shadow-hover-glow transition duration-200">
+                                    ${appState.timer.isRunning 
+                                        ? `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> Pause`
+                                        : `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> Start`}
+                                </button>
+                                <button id="timer-reset-btn" class="flex items-center justify-center px-6 py-3 border border-gray-300 dark:border-gray-700 text-text-secondary-gray dark:text-gray-400 font-medium rounded-xl-custom hover:bg-gray-100 dark:hover:bg-primary-dark/50 transition duration-200">
+                                    <svg class="w-6 h-6 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356-2A8.964 8.964 0 0120 12c0 4.966-4.034 9-9 9a8.964 8.964 0 01-5.143-1.588M4 12c0-4.966 4.034-9 9-9s9 4.034 9 9"></path></svg> Reset
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="space-y-6">
+                        <div class="p-6 bg-white dark:bg-primary-dark/90 rounded-xl-custom shadow-subtle border border-gray-100 dark:border-primary-dark/50">
+                            <h2 class="text-xl font-heading mb-4">Daily Goal (${appState.dailyGoal} Min)</h2>
+                            <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-primary-dark rounded-lg mb-2">
+                                <span class="text-2xl font-mono text-interactive-blue">${Math.round(appState.timer.focusMinutesLogged)}</span>
+                                <span class="text-text-secondary-gray">Minutes Logged Today</span>
+                            </div>
+                            <div class="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
+                                <div class="h-2.5 rounded-full bg-interactive-blue transition-all duration-500" style="width: ${focusProgress}%"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="p-6 bg-white dark:bg-primary-dark/90 rounded-xl-custom shadow-subtle border border-gray-100 dark:border-primary-dark/50">
+                            <h2 class="text-xl font-heading mb-4 text-accent-red">Focus Streak</h2>
+                            <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-primary-dark rounded-lg">
+                                <span class="text-3xl font-mono text-accent-red">${appState.focusStreak}</span>
+                                <span class="text-text-secondary-gray">Days in a Row 🔥</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+                    <div class="p-6 bg-white dark:bg-primary-dark/90 rounded-xl-custom shadow-subtle border border-gray-100 dark:border-primary-dark/50">
+                        <h2 class="text-xl font-heading mb-4">Quick Notes</h2>
+                        <textarea id="quick-notes-input" class="w-full h-32 p-3 border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-primary-dark rounded-xl-custom focus:ring-interactive-blue focus:border-interactive-blue transition duration-200 font-body text-sm text-text-primary-dark dark:text-bg-light" placeholder="Jot down quick ideas, concepts, or meeting notes..."></textarea>
+                        <div class="flex justify-end space-x-2 mt-3">
+                            <button id="ai-summary-notes-btn" class="px-4 py-2 text-sm bg-accent-red/10 text-accent-red font-medium rounded-xl-custom hover:bg-accent-red/20 transition duration-200">
+                                🧠 AI Summarize
+                            </button>
+                            <button id="save-notes-btn" class="px-4 py-2 text-sm bg-interactive-blue text-white font-medium rounded-xl-custom hover:bg-interactive-blue/90 transition duration-200">
+                                Save Notes
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="p-6 bg-white dark:bg-primary-dark/90 rounded-xl-custom shadow-subtle border border-gray-100 dark:border-primary-dark/50">
+                        <h2 class="text-xl font-heading mb-4">Active Tasks (${activeTasks.length})</h2>
+                        <div id="active-tasks-list" class="space-y-3 mb-4">
+                            ${activeTasks.length > 0 ? activeTasks.map(task => `
+                                <div data-task-id="${task.id}" class="flex items-center justify-between p-3 bg-gray-50 dark:bg-primary-dark rounded-xl-custom hover:bg-gray-100 dark:hover:bg-primary-dark/50 transition duration-200 border border-gray-200 dark:border-gray-700">
+                                    <div class="flex items-center">
+                                        <button data-task-id="${task.id}" class="task-checkbox toggle-completion-btn w-6 h-6 mr-3 border-2 ${task.completed ? 'border-interactive-blue bg-interactive-blue' : 'border-gray-400 dark:border-gray-600'} rounded-full flex items-center justify-center hover:scale-105 transition duration-200">
+                                            ${task.completed ? `<svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>` : ''}
+                                        </button>
+                                        <span class="text-sm font-body ${task.completed ? 'line-through text-text-secondary-gray dark:text-gray-500' : ''}">${task.title}</span>
+                                    </div>
+                                    <span class="text-xs font-mono px-3 py-1 rounded-full ${badgeClass(task.priority)}">${task.priority}</span>
+                                </div>
+                            `).join('') : `
+                                <p class="text-text-secondary-gray dark:text-gray-400 p-3 text-center">No active tasks! Time to relax or add a new one below. 🎉</p>
+                            `}
+                        </div>
+                        
+                        <div class="flex mt-4">
+                            <input id="quick-add-task-input" type="text" placeholder="Add a new task..." class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-primary-dark rounded-l-xl-custom focus:ring-interactive-blue focus:border-interactive-blue transition duration-200 text-sm text-text-primary-dark dark:text-bg-light">
+                            <button id="add-task-btn" class="px-4 py-2 bg-interactive-blue text-white rounded-r-xl-custom hover:bg-interactive-blue/90 transition duration-200">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="lg:col-span-2 mt-6 p-6 bg-white dark:bg-primary-dark/90 rounded-xl-custom shadow-subtle border border-gray-100 dark:border-primary-dark/50">
+                    <h2 class="text-xl font-heading mb-4 text-interactive-blue">Daily Focus Log & Journal</h2>
+                    <textarea id="daily-log-input" class="w-full h-32 p-3 border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-primary-dark rounded-xl-custom focus:ring-interactive-blue focus:border-interactive-blue transition duration-200 font-body text-sm text-text-primary-dark dark:text-bg-light" placeholder="What did you focus on today? Any insights, breakthroughs, or blockers?"></textarea>
+                    <div class="flex justify-between items-center mt-3">
+                        <h3 class="text-sm font-heading">Last Entry: <span class="text-text-secondary-gray dark:text-gray-400 font-body">${lastLogEntry ? new Date(lastLogEntry.timestamp).toLocaleDateString() : 'N/A'}</span></h3>
+                        <button id="save-daily-log-btn" class="px-4 py-2 text-sm bg-interactive-blue text-white font-medium rounded-xl-custom hover:bg-interactive-blue/90 transition duration-200">
+                            Save Today's Log
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function getTasksContentHTML() {
+            const priorityOptions = ['High', 'Medium', 'Low'];
+            const typeOptions = ['Study', 'Project', 'Admin', 'General'];
+            
+            const getTaskItem = (task) => {
+                const badgeClass = (priority) => {
+                    switch (priority) {
+                        case 'High': return 'bg-accent-red/20 text-accent-red';
+                        case 'Medium': return 'bg-interactive-blue/20 text-interactive-blue';
+                        case 'Low': return 'bg-gray-400/20 text-gray-500 dark:text-gray-400';
+                        default: return 'bg-gray-400/20 text-gray-500 dark:text-gray-400';
+                    }
+                };
+                
+                const dueDateDisplay = task.dueDate ? new Date(task.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'No Due Date';
+                const isOverdue = task.dueDate && new Date(task.dueDate) < new Date() && !task.completed;
+                const dueDateClass = isOverdue ? 'text-accent-red font-semibold' : 'text-text-secondary-gray dark:text-gray-400';
+                
+                return `
+                    <li data-task-id="${task.id}" class="flex items-center justify-between p-4 bg-white dark:bg-primary-dark/90 rounded-xl-custom shadow-subtle border border-gray-100 dark:border-primary-dark/50 transition duration-200 hover:scale-[1.01] hover:shadow-lg">
+                        <div class="flex items-center flex-1 min-w-0">
+                            <button class="toggle-completion-btn w-6 h-6 mr-4 border-2 ${task.completed ? 'border-interactive-blue bg-interactive-blue' : 'border-gray-400 dark:border-gray-600'} rounded-full flex items-center justify-center transition duration-200 hover:scale-110">
+                                ${task.completed ? `<svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>` : ''}
+                            </button>
+                            <span class="flex-1 truncate ${task.completed ? 'line-through text-text-secondary-gray dark:text-gray-500' : 'text-text-primary-dark dark:text-bg-light'} font-body">${task.title}</span>
+                        </div>
+                        
+                        <div class="flex items-center space-x-3 ml-4">
+                            <span class="text-xs font-mono px-3 py-1 rounded-full ${badgeClass(task.priority)} hidden sm:block">${task.priority}</span>
+                            
+                            <span class="text-xs font-body ${dueDateClass} hidden sm:block">
+                                <span class="font-semibold mr-1">${isOverdue ? 'OVERDUE' : 'Due:'}</span> ${dueDateDisplay}
+                            </span>
+                            
+                            <button class="ai-priority-btn p-2 text-interactive-blue hover:text-white hover:bg-interactive-blue rounded-full transition duration-200" title="AI Suggest Priority">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M4.775 8.32l.707.707M21 12h-1M4 12H3m3.342 6.364l-.708-.707M19.071 4.929l-.708.707M17 12a5 5 0 11-10 0 5 5 0 0110 0z"></path></svg>
+                            </button>
+                            
+                            <button class="delete-task-btn p-2 text-accent-red hover:text-white hover:bg-accent-red rounded-full transition duration-200" title="Delete Task">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                            </button>
+                        </div>
+                    </li>
+                `;
+            };
+
+            return `
+                <h1 class="text-3xl md:text-4xl font-heading mb-6">Task & Project Manager</h1>
+                
+                <div class="p-6 mb-6 bg-interactive-blue/5 dark:bg-primary-dark/50 rounded-xl-custom shadow-subtle border border-interactive-blue/10 dark:border-primary-dark/20">
+                    <h2 class="text-xl font-heading mb-4 text-interactive-blue">Add New Task</h2>
+                    <form id="new-task-form" class="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+                        <div class="md:col-span-2">
+                            <label for="new-task-title" class="block text-sm font-medium text-text-primary-dark dark:text-bg-light mb-1">Task Title</label>
+                            <input type="text" id="new-task-title" required placeholder="e.g., Finalize presentation slides" class="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-primary-dark rounded-xl-custom focus:ring-interactive-blue focus:border-interactive-blue transition duration-200 text-text-primary-dark dark:text-bg-light">
+                        </div>
+                        <div>
+                            <label for="new-task-priority" class="block text-sm font-medium text-text-primary-dark dark:text-bg-light mb-1">Priority</label>
+                            <select id="new-task-priority" class="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-primary-dark rounded-xl-custom focus:ring-interactive-blue focus:border-interactive-blue transition duration-200 appearance-none text-text-primary-dark dark:text-bg-light">
+                                ${priorityOptions.map(p => `<option value="${p}" ${p === 'Medium' ? 'selected' : ''}>${p}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div>
+                            <label for="new-task-type" class="block text-sm font-medium text-text-primary-dark dark:text-bg-light mb-1">Type</label>
+                            <select id="new-task-type" class="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-primary-dark rounded-xl-custom focus:ring-interactive-blue focus:border-interactive-blue transition duration-200 appearance-none text-text-primary-dark dark:text-bg-light">
+                                ${typeOptions.map(t => `<option value="${t}" ${t === 'General' ? 'selected' : ''}>${t}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div>
+                            <label for="new-task-due-date" class="block text-sm font-medium text-text-primary-dark dark:text-bg-light mb-1">Due Date</label>
+                            <input type="date" id="new-task-due-date" class="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-primary-dark rounded-xl-custom focus:ring-interactive-blue focus:border-interactive-blue transition duration-200 text-text-primary-dark dark:text-bg-light">
+                        </div>
+                        
+                        <button type="submit" class="md:col-span-5 lg:col-span-1 px-6 py-3 bg-interactive-blue text-white font-heading rounded-xl-custom shadow-md hover:scale-[1.01] transition duration-200">
+                            Add Task
+                        </button>
+                    </form>
+                </div>
+                
+                <h2 class="text-2xl font-heading mb-4">Current Tasks (${appState.tasks.length})</h2>
+                
+                <div class="flex justify-end mb-4">
+                    <button id="ai-summarize-tasks-btn" class="px-4 py-2 text-sm bg-accent-red/10 text-accent-red font-medium rounded-xl-custom hover:bg-accent-red/20 transition duration-200">
+                        🧠 AI Summarize / Suggest Next
+                    </button>
+                </div>
+
+                <ul id="tasks-full-list" class="space-y-4">
+                    ${appState.tasks.length > 0 ? appState.tasks.map(getTaskItem).join('') : `
+                        <p class="text-text-secondary-gray dark:text-gray-400 p-6 bg-white dark:bg-primary-dark/90 rounded-xl-custom text-center shadow-subtle">
+                            You're all caught up! Add a new task above to get started.
+                        </p>
+                    `}
+                </ul>
+            `;
+        }
+
+        function getAnalyticsContentHTML() {
+            return `
+                <h1 class="text-3xl md:text-4xl font-heading mb-6">Analytics Dashboard</h1>
+                
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="p-6 bg-white dark:bg-primary-dark/90 rounded-xl-custom shadow-subtle border border-gray-100 dark:border-primary-dark/50 h-96">
+                        <canvas id="weeklyFocusChart"></canvas>
+                    </div>
+                    
+                    <div class="p-6 bg-white dark:bg-primary-dark/90 rounded-xl-custom shadow-subtle border border-gray-100 dark:border-primary-dark/50 h-96">
+                        <canvas id="taskTypeChart"></canvas>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mt-6">
+                    <div class="p-6 bg-interactive-blue/10 dark:bg-interactive-blue/50 rounded-xl-custom shadow-subtle text-interactive-blue dark:text-bg-light">
+                        <p class="text-sm font-heading mb-1">Total Focus Logged</p>
+                        <p class="text-3xl font-mono">${Math.round(appState.timer.focusMinutesLogged)} Min</p>
+                    </div>
+                    <div class="p-6 bg-accent-red/10 dark:bg-accent-red/50 rounded-xl-custom shadow-subtle text-accent-red dark:text-bg-light">
+                        <p class="text-sm font-heading mb-1">Tasks Completed</p>
+                        <p class="text-3xl font-mono">${appState.tasks.filter(t => t.completed).length}</p>
+                    </div>
+                     <div class="p-6 bg-gray-200 dark:bg-primary-dark/50 rounded-xl-custom shadow-subtle text-text-primary-dark dark:text-bg-light">
+                        <p class="text-sm font-heading mb-1">Total Tasks</p>
+                        <p class="text-3xl font-mono">${appState.tasks.length}</p>
+                    </div>
+                    <div class="p-6 bg-gray-200 dark:bg-primary-dark/50 rounded-xl-custom shadow-subtle text-text-primary-dark dark:text-bg-light">
+                        <p class="text-sm font-heading mb-1">Current Focus Streak</p>
+                        <p class="text-3xl font-mono">${appState.focusStreak} Days</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        function getSettingsContentHTML() {
+            return `
+                <h1 class="text-3xl md:text-4xl font-heading mb-6">Settings & Preferences</h1>
+
+                <div class="max-w-3xl space-y-6">
+                    <div class="p-6 bg-white dark:bg-primary-dark/90 rounded-xl-custom shadow-subtle border border-gray-100 dark:border-primary-dark/50 flex items-center justify-between">
+                        <div>
+                            <h2 class="text-xl font-heading mb-1">Dark Mode</h2>
+                            <p class="text-text-secondary-gray dark:text-gray-400 text-sm">Switch between light and dark themes.</p>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" value="" id="theme-toggle" onclick="toggleTheme()" class="sr-only peer" ${appState.isDarkTheme ? 'checked' : ''}>
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-interactive-blue/50 dark:peer-focus:ring-interactive-blue rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-interactive-blue"></div>
+                        </label>
+                    </div>
+                    
+                    <div class="p-6 bg-interactive-blue/5 dark:bg-primary-dark/50 rounded-xl-custom shadow-subtle border border-interactive-blue/10 dark:border-primary-dark/20">
+                        <h2 class="text-xl font-heading mb-4 text-interactive-blue">Pomodoro Profile</h2>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label for="work-duration-input" class="block text-sm font-medium text-text-primary-dark dark:text-bg-light mb-1">Work Duration (Minutes)</label>
+                                <input type="number" id="work-duration-input" min="1" max="180" placeholder="25" class="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-primary-dark rounded-xl-custom focus:ring-interactive-blue focus:border-interactive-blue transition duration-200 text-text-primary-dark dark:text-bg-light">
+                            </div>
+                            <div>
+                                <label for="break-duration-input" class="block text-sm font-medium text-text-primary-dark dark:text-bg-light mb-1">Break Duration (Minutes)</label>
+                                <input type="number" id="break-duration-input" min="1" max="30" placeholder="5" class="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-primary-dark rounded-xl-custom focus:ring-interactive-blue focus:border-interactive-blue transition duration-200 text-text-primary-dark dark:text-bg-light">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="p-6 bg-white dark:bg-primary-dark/90 rounded-xl-custom shadow-subtle border border-gray-100 dark:border-primary-dark/50">
+                        <h2 class="text-xl font-heading mb-3">Ambient Sound</h2>
+                        <label for="ambient-sound-select" class="block text-sm font-medium text-text-primary-dark dark:text-bg-light mb-1">Select Focus Background Noise</label>
+                        <select id="ambient-sound-select" class="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-primary-dark rounded-xl-custom focus:ring-interactive-blue focus:border-interactive-blue transition duration-200 appearance-none text-text-primary-dark dark:text-bg-light">
+                            <option value="none">None</option>
+                            <option value="rain">Rain 🌧️</option>
+                            <option value="cafe">Coffee Shop ☕</option>
+                            <option value="whitenoise">White Noise 🔊</option>
+                        </select>
+                        <p class="text-text-secondary-gray dark:text-gray-400 text-xs mt-2">Note: Sound playback is a placeholder feature for this prototype.</p>
+                    </div>
+
+                    <div class="p-6 bg-accent-red/5 dark:bg-primary-dark/50 rounded-xl-custom shadow-subtle border border-accent-red/10 dark:border-primary-dark/20">
+                        <h2 class="text-xl font-heading mb-3 text-accent-red">AI Integration (API Key)</h2>
+                        <label for="ai-api-key-input" class="block text-sm font-medium text-text-primary-dark dark:text-bg-light mb-1">OpenAI or Custom AI API Key (Required for AI Features)</label>
+                        <input type="password" id="ai-api-key-input" placeholder="sk-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" value="" class="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-primary-dark rounded-xl-custom focus:ring-accent-red focus:border-accent-red transition duration-200 font-mono text-text-primary-dark dark:text-bg-light">
+                        <p class="text-text-secondary-gray dark:text-gray-400 text-sm mt-2">This key enables features like AI Note Summarization and Priority Suggestion.</p>
+                    </div>
+                    
+                    <div class="flex justify-end">
+                        <button id="save-settings-btn" class="px-8 py-3 bg-interactive-blue text-white font-heading rounded-xl-custom shadow-md hover:scale-[1.02] transition duration-200">
+                            Save Settings
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+
+        // --- INITIALIZATION ---
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Check for saved theme preference (basic local storage)
+            const savedTheme = localStorage.getItem('focusforge-theme');
+            if (savedTheme === 'dark') {
+                appState.isDarkTheme = true;
+            } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                 // Check system preference if no saved preference
+                 appState.isDarkTheme = true;
+            }
+            
+            // Initial render
+            renderPage();
+            
+            // Persist theme choice (for the next time the app loads)
+            const body = document.getElementById('app-body');
+            const observer = new MutationObserver(() => {
+                const isDark = body.classList.contains('dark');
+                localStorage.setItem('focusforge-theme', isDark ? 'dark' : 'light');
+            });
+            observer.observe(body, { attributes: true, attributeFilter: ['class'] });
+        });
+    </script>
+
+</body>
+</html>

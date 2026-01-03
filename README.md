@@ -22,7 +22,7 @@ FocusForge is different — it keeps things simple so you can actually get work 
 
 ## 📌 Status
 This is the **first project** in my Focus Series  
-Next: **FocusGuard** (desktop focus monitoring app)
+Next: **Eclipse** (desktop focus monitoring app)
 
 ## 🤝 Feedback
 Suggestions and improvements are welcome!

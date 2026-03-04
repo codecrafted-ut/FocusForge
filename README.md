@@ -8,8 +8,6 @@
 - Fast and lightweight
 - Built for students
 
-## 🚀 Demo
-▶️ Short demo video included in this repo
 
 ## 🛠 Tech Stack
 - HTML
